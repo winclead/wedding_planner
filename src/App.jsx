@@ -1,16 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { weddingTimeline, budgetTiers } from './data';
+import { buildPriceDB } from './priceFetcher';
 
 function App() {
-  // 초기 상태 세팅 (isExcluded: 제외 여부 추가)
-  const initialSelections = {};
-  weddingTimeline.forEach(step => {
-    step.items.forEach(item => {
-      initialSelections[item.id] = { tier: 'standard', customPrice: '', isExcluded: false };
-    });
-  });
+  const [selections, setSelections] = useState({});
+  const [priceDB, setPriceDB] = useState(null); // 외부에서 가져온 가격 DB 상태
 
-  const [selections, setSelections] = useState(initialSelections);
+  // 1. 앱 로드 시 가격 DB 가져오기 & 초기 선택 상태 세팅
+  useEffect(() => {
+    const initApp = async () => {
+      // API 통신을 통해 가격 데이터를 받아옵니다.
+      const fetchedDB = await buildPriceDB();
+      setPriceDB(fetchedDB);
+
+      // 초기 선택 상태 세팅
+      const initSels = {};
+      weddingTimeline.forEach(step => {
+        step.items.forEach(item => {
+          initSels[item.id] = { tier: 'standard', customPrice: '', isExcluded: false };
+        });
+      });
+      setSelections(initSels);
+    };
+
+    initApp();
+  }, []);
 
   // 티어(가성비, 스탠다드 등) 변경 핸들러
   const handleTierChange = (itemId, tierId) => {
@@ -20,9 +34,8 @@ function App() {
     }));
   };
 
-  // 직접입력 금액 콤마 처리 핸들러
+  // 직접입력 금액 변경 핸들러
   const handleCustomPriceChange = (itemId, value) => {
-    // 숫자 이외의 문자 제거
     const numericValue = value.replace(/[^0-9]/g, '');
     setSelections(prev => ({
       ...prev,
@@ -30,7 +43,7 @@ function App() {
     }));
   };
 
-  // '제외' 체크박스 토글 핸들러
+  // 개별 항목 제외 토글 핸들러
   const toggleExclude = (itemId) => {
     setSelections(prev => ({
       ...prev,
@@ -38,13 +51,28 @@ function App() {
     }));
   };
 
-  // 항목별 일괄 선택 (전체 가성비/스탠다드/프리미엄 클릭 시)
+  // ★ 추가된 기능: 카테고리 전체 포함/제외 토글 핸들러
+  const toggleCategoryExclude = (stepId, isCurrentlyIncluded) => {
+    setSelections(prev => {
+      const next = { ...prev };
+      const step = weddingTimeline.find(s => s.id === stepId);
+      
+      // 현재 카테고리가 활성화(포함) 상태면 하위를 모두 제외(true)로 바꾸고, 반대면 모두 포함(false)으로 바꿈
+      const targetIsExcluded = isCurrentlyIncluded; 
+      
+      step.items.forEach(item => {
+        next[item.id] = { ...next[item.id], isExcluded: targetIsExcluded };
+      });
+      return next;
+    });
+  };
+
+  // 항목별 일괄 선택
   const handleBatchSelect = (stepId, tierId) => {
     setSelections(prev => {
       const next = { ...prev };
       const step = weddingTimeline.find(s => s.id === stepId);
       step.items.forEach(item => {
-        // 제외된 항목은 건드리지 않음
         if (!next[item.id].isExcluded) {
           next[item.id] = { ...next[item.id], tier: tierId };
         }
@@ -53,16 +81,28 @@ function App() {
     });
   };
 
+  // 데이터 로딩 중 화면
+  if (!priceDB || Object.keys(selections).length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-xl text-indigo-600 font-bold animate-pulse">
+          최신 예산 데이터를 불러오는 중입니다...
+        </div>
+      </div>
+    );
+  }
+
   // 합계 계산
   const categoryTotals = weddingTimeline.map(step => {
     const stepTotal = step.items.reduce((sum, item) => {
       const sel = selections[item.id];
-      if (sel.isExcluded) return sum; // 제외 시 0원
+      if (sel.isExcluded) return sum; 
       
       if (sel.tier === 'custom') {
         return sum + (parseInt(sel.customPrice) || 0);
       }
-      return sum + item.prices[sel.tier];
+      // 이제 item.prices가 아닌 외부에서 가져온 priceDB에서 가격을 찾습니다.
+      return sum + priceDB[item.id][sel.tier];
     }, 0);
     return { id: step.id, title: step.title, total: stepTotal };
   });
@@ -79,118 +119,125 @@ function App() {
 
       <div className="max-w-6xl mx-auto p-4 flex flex-col lg:flex-row gap-5 mt-4">
         
-        {/* 메인 리스트 */}
-        <div className="flex-1 space-y-4"> {/* 간격 촘촘하게 (space-y-6 -> 4) */}
-          {weddingTimeline.map((step) => (
-            <div key={step.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"> {/* 패딩 축소 */}
-              
-              {/* 카테고리 헤더 & 일괄 선택 버튼 */}
-              <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-gray-100 pb-2 mb-3 gap-2">
-                <div className="flex items-end">
-                  <span className="text-lg font-bold text-indigo-600 mr-2">{step.period}</span>
-                  <h2 className="text-base font-semibold text-gray-800">{step.title}</h2>
+        <div className="flex-1 space-y-4">
+          {weddingTimeline.map((step) => {
+            // 이 카테고리 내에 하나라도 포함(isExcluded가 false)된 항목이 있는지 확인
+            const isCategoryIncluded = step.items.some(item => !selections[item.id].isExcluded);
+
+            return (
+              <div key={step.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                
+                <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-gray-100 pb-2 mb-3 gap-2">
+                  <div className="flex items-center">
+                    {/* ★ 카테고리 전체 제어 체크박스 */}
+                    <input
+                      type="checkbox"
+                      checked={isCategoryIncluded}
+                      onChange={() => toggleCategoryExclude(step.id, isCategoryIncluded)}
+                      className="w-5 h-5 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer mr-3"
+                    />
+                    <span className={`text-lg font-bold mr-2 ${isCategoryIncluded ? 'text-indigo-600' : 'text-gray-400'}`}>
+                      {step.period}
+                    </span>
+                    <h2 className={`text-base font-semibold ${isCategoryIncluded ? 'text-gray-800' : 'text-gray-400 line-through'}`}>
+                      {step.title}
+                    </h2>
+                  </div>
+                  
+                  <div className={`flex gap-1.5 ${!isCategoryIncluded ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <span className="text-xs text-gray-400 mr-1 self-center hidden sm:inline">일괄선택:</span>
+                    {['budget', 'standard', 'premium'].map(tierId => (
+                      <button
+                        key={tierId}
+                        onClick={() => handleBatchSelect(step.id, tierId)}
+                        className="text-xs px-2 py-1 bg-gray-100 hover:bg-indigo-100 text-gray-600 hover:text-indigo-700 rounded transition-colors"
+                      >
+                        {budgetTiers.find(t => t.id === tierId).label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex gap-1.5">
-                  <span className="text-xs text-gray-400 mr-1 self-center hidden sm:inline">일괄선택:</span>
-                  {['budget', 'standard', 'premium'].map(tierId => (
-                    <button
-                      key={tierId}
-                      onClick={() => handleBatchSelect(step.id, tierId)}
-                      className="text-xs px-2 py-1 bg-gray-100 hover:bg-indigo-100 text-gray-600 hover:text-indigo-700 rounded transition-colors"
-                    >
-                      {budgetTiers.find(t => t.id === tierId).label}
-                    </button>
-                  ))}
-                </div>
-              </div>
 
-              {/* 항목 리스트 */}
-              <div className="space-y-2"> {/* 항목 간격 촘촘하게 */}
-                {step.items.map((item) => {
-                  const sel = selections[item.id];
-                  const isCustom = sel.tier === 'custom';
-                  const currentPrice = sel.isExcluded ? 0 : (isCustom ? (parseInt(sel.customPrice) || 0) : item.prices[sel.tier]);
+                <div className="space-y-2">
+                  {step.items.map((item) => {
+                    const sel = selections[item.id];
+                    const isCustom = sel.tier === 'custom';
+                    // priceDB 연동 완료
+                    const currentPrice = sel.isExcluded ? 0 : (isCustom ? (parseInt(sel.customPrice) || 0) : priceDB[item.id][sel.tier]);
 
-                  return (
-                    <div 
-                      key={item.id} 
-                      className={`flex flex-col xl:flex-row xl:items-center justify-between gap-3 p-2.5 rounded border transition-colors ${
-                        sel.isExcluded ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-200 hover:border-indigo-200 shadow-sm'
-                      }`}
-                    >
-                      
-                      {/* 1. 체크박스 & 항목명 */}
-                      <div className="w-full xl:w-1/4 flex items-center">
-                        <label className="flex items-center cursor-pointer group">
-                          <input
-                            type="checkbox"
-                            checked={!sel.isExcluded}
-                            onChange={() => toggleExclude(item.id)}
-                            className="w-4 h-4 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
-                          />
-                          <span className={`ml-3 font-medium text-sm transition-colors ${sel.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700 group-hover:text-indigo-600'}`}>
-                            {item.name}
-                          </span>
-                        </label>
-                      </div>
-
-                      {/* 2. 옵션 버튼 그룹 (가로 스크롤 제거, 마우스오버 툴팁) */}
-                      <div className={`w-full xl:w-[45%] flex flex-wrap sm:flex-nowrap gap-1 ${sel.isExcluded ? 'pointer-events-none' : ''}`}>
-                        {budgetTiers.map(tier => (
-                          <div key={tier.id} className="relative flex-1 group">
-                            <button
-                              onClick={() => handleTierChange(item.id, tier.id)}
-                              className={`w-full whitespace-nowrap py-1.5 px-1 text-[13px] rounded transition-colors border ${
-                                (!sel.isExcluded && sel.tier === tier.id)
-                                  ? 'bg-indigo-600 text-white border-indigo-600 font-medium'
-                                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                              }`}
-                            >
-                              {tier.label}
-                            </button>
-                            
-                            {/* 마우스오버 툴팁 (직접입력이 아닐 때만 표시) */}
-                            {tier.id !== 'custom' && item.tooltips && (
-                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block w-max max-w-[200px] bg-gray-800 text-white text-xs px-2.5 py-1.5 rounded shadow-lg z-10 break-words text-center pointer-events-none">
-                                {item.tooltips[tier.id]}
-                                {/* 툴팁 꼬리 */}
-                                <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* 3. 가격 / 직접입력란 */}
-                      <div className="w-full xl:w-[25%] flex justify-end items-center">
-                        {(!sel.isExcluded && isCustom) ? (
-                          <div className="flex items-center w-full justify-end">
+                    return (
+                      <div 
+                        key={item.id} 
+                        className={`flex flex-col xl:flex-row xl:items-center justify-between gap-3 p-2.5 rounded border transition-colors ${
+                          sel.isExcluded ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-200 hover:border-indigo-200 shadow-sm'
+                        }`}
+                      >
+                        <div className="w-full xl:w-1/4 flex items-center">
+                          <label className="flex items-center cursor-pointer group">
                             <input
-                              type="text"
-                              placeholder="금액 입력"
-                              // 콤마(,) 찍어서 보여주기
-                              value={sel.customPrice ? Number(sel.customPrice).toLocaleString() : ''}
-                              onChange={(e) => handleCustomPriceChange(item.id, e.target.value)}
-                              className="w-[120px] text-right p-1.5 border border-indigo-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm font-medium"
+                              type="checkbox"
+                              checked={!sel.isExcluded}
+                              onChange={() => toggleExclude(item.id)}
+                              className="w-4 h-4 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
                             />
-                            <span className="ml-1.5 text-gray-600 text-sm">원</span>
-                          </div>
-                        ) : (
-                          <div className={`text-base font-bold ${sel.isExcluded ? 'text-gray-400' : 'text-gray-800'}`}>
-                            {sel.isExcluded ? '제외됨' : `${currentPrice.toLocaleString()}원`}
-                          </div>
-                        )}
-                      </div>
+                            <span className={`ml-3 font-medium text-sm transition-colors ${sel.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700 group-hover:text-indigo-600'}`}>
+                              {item.name}
+                            </span>
+                          </label>
+                        </div>
 
-                    </div>
-                  );
-                })}
+                        <div className={`w-full xl:w-[45%] flex flex-wrap sm:flex-nowrap gap-1 ${sel.isExcluded ? 'pointer-events-none' : ''}`}>
+                          {budgetTiers.map(tier => (
+                            <div key={tier.id} className="relative flex-1 group">
+                              <button
+                                onClick={() => handleTierChange(item.id, tier.id)}
+                                className={`w-full whitespace-nowrap py-1.5 px-1 text-[13px] rounded transition-colors border ${
+                                  (!sel.isExcluded && sel.tier === tier.id)
+                                    ? 'bg-indigo-600 text-white border-indigo-600 font-medium'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                                }`}
+                              >
+                                {tier.label}
+                              </button>
+                              
+                              {tier.id !== 'custom' && item.tooltips && (
+                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block w-max max-w-[200px] bg-gray-800 text-white text-xs px-2.5 py-1.5 rounded shadow-lg z-10 break-words text-center pointer-events-none">
+                                  {item.tooltips[tier.id]}
+                                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="w-full xl:w-[25%] flex justify-end items-center">
+                          {(!sel.isExcluded && isCustom) ? (
+                            <div className="flex items-center w-full justify-end">
+                              <input
+                                type="text"
+                                placeholder="금액 입력"
+                                value={sel.customPrice ? Number(sel.customPrice).toLocaleString() : ''}
+                                onChange={(e) => handleCustomPriceChange(item.id, e.target.value)}
+                                className="w-[120px] text-right p-1.5 border border-indigo-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm font-medium"
+                              />
+                              <span className="ml-1.5 text-gray-600 text-sm">원</span>
+                            </div>
+                          ) : (
+                            <div className={`text-base font-bold ${sel.isExcluded ? 'text-gray-400' : 'text-gray-800'}`}>
+                              {sel.isExcluded ? '제외됨' : `${currentPrice.toLocaleString()}원`}
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* 오른쪽 고정 사이드바 */}
         <div className="w-full lg:w-72 relative">
           <div className="sticky top-4 bg-white rounded-lg shadow-sm border border-indigo-100 overflow-hidden">
             <div className="bg-indigo-50 p-4 border-b border-indigo-100">
