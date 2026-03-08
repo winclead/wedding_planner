@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { weddingTimeline, budgetTiers } from './data';
-import { buildPriceDB } from './priceFetcher';
+import { buildPriceDB } from './api'; // 아까 바꾸신 이름 적용!
 
 function App() {
   const [selections, setSelections] = useState({});
-  const [priceDB, setPriceDB] = useState(null); // 외부에서 가져온 가격 DB 상태
+  const [priceDB, setPriceDB] = useState(null);
 
-  // 1. 앱 로드 시 가격 DB 가져오기 & 초기 선택 상태 세팅
   useEffect(() => {
     const initApp = async () => {
-      // API 통신을 통해 가격 데이터를 받아옵니다.
       const fetchedDB = await buildPriceDB();
       setPriceDB(fetchedDB);
 
-      // 초기 선택 상태 세팅
+      // 초기 세팅: 기본적으로 '풀코스' 상태로 로드
       const initSels = {};
       weddingTimeline.forEach(step => {
         step.items.forEach(item => {
@@ -26,7 +24,23 @@ function App() {
     initApp();
   }, []);
 
-  // 티어(가성비, 스탠다드 등) 변경 핸들러
+  // ★ 추가된 기능: 풀코스 / 핵심 프리셋 적용
+  const applyPreset = (presetType) => {
+    setSelections(prev => {
+      const next = { ...prev };
+      weddingTimeline.forEach(step => {
+        step.items.forEach(item => {
+          if (presetType === 'full') {
+            next[item.id].isExcluded = false; // 전부 포함
+          } else if (presetType === 'essential') {
+            next[item.id].isExcluded = !item.isEssential; // 필수가 아니면 제외(true)
+          }
+        });
+      });
+      return next;
+    });
+  };
+
   const handleTierChange = (itemId, tierId) => {
     setSelections(prev => ({
       ...prev,
@@ -34,7 +48,6 @@ function App() {
     }));
   };
 
-  // 직접입력 금액 변경 핸들러
   const handleCustomPriceChange = (itemId, value) => {
     const numericValue = value.replace(/[^0-9]/g, '');
     setSelections(prev => ({
@@ -43,7 +56,6 @@ function App() {
     }));
   };
 
-  // 개별 항목 제외 토글 핸들러
   const toggleExclude = (itemId) => {
     setSelections(prev => ({
       ...prev,
@@ -51,13 +63,10 @@ function App() {
     }));
   };
 
-  // ★ 추가된 기능: 카테고리 전체 포함/제외 토글 핸들러
   const toggleCategoryExclude = (stepId, isCurrentlyIncluded) => {
     setSelections(prev => {
       const next = { ...prev };
       const step = weddingTimeline.find(s => s.id === stepId);
-      
-      // 현재 카테고리가 활성화(포함) 상태면 하위를 모두 제외(true)로 바꾸고, 반대면 모두 포함(false)으로 바꿈
       const targetIsExcluded = isCurrentlyIncluded; 
       
       step.items.forEach(item => {
@@ -67,7 +76,6 @@ function App() {
     });
   };
 
-  // 항목별 일괄 선택
   const handleBatchSelect = (stepId, tierId) => {
     setSelections(prev => {
       const next = { ...prev };
@@ -81,7 +89,6 @@ function App() {
     });
   };
 
-  // 데이터 로딩 중 화면
   if (!priceDB || Object.keys(selections).length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -92,16 +99,11 @@ function App() {
     );
   }
 
-  // 합계 계산
   const categoryTotals = weddingTimeline.map(step => {
     const stepTotal = step.items.reduce((sum, item) => {
       const sel = selections[item.id];
       if (sel.isExcluded) return sum; 
-      
-      if (sel.tier === 'custom') {
-        return sum + (parseInt(sel.customPrice) || 0);
-      }
-      // 이제 item.prices가 아닌 외부에서 가져온 priceDB에서 가격을 찾습니다.
+      if (sel.tier === 'custom') return sum + (parseInt(sel.customPrice) || 0);
       return sum + priceDB[item.id][sel.tier];
     }, 0);
     return { id: step.id, title: step.title, total: stepTotal };
@@ -111,17 +113,39 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans pb-20">
+      
+      {/* 상단 헤더 & 프리셋 버튼 영역 */}
       <div className="bg-indigo-600 text-white p-5 shadow-md">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <h1 className="text-xl font-bold">웨딩 & 허니문 예산 플래너</h1>
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">웨딩 & 허니문 예산 플래너</h1>
+            <p className="opacity-80 text-sm mt-1">항목별 예산을 관리하고 실시간으로 총액을 확인하세요.</p>
+          </div>
+          
+          {/* ★ 프리셋 선택 버튼 */}
+          <div className="flex bg-indigo-700 p-1 rounded-lg border border-indigo-500">
+            <button 
+              onClick={() => applyPreset('full')}
+              className="px-4 py-2 text-sm font-medium rounded-md hover:bg-indigo-500 transition-colors"
+            >
+              ✨ 풀코스 (전체 선택)
+            </button>
+            <div className="w-px bg-indigo-500 mx-1"></div>
+            <button 
+              onClick={() => applyPreset('essential')}
+              className="px-4 py-2 text-sm font-medium rounded-md hover:bg-indigo-500 transition-colors"
+            >
+              🎯 핵심만 (필수 항목)
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="max-w-6xl mx-auto p-4 flex flex-col lg:flex-row gap-5 mt-4">
         
+        {/* 왼쪽 리스트 영역 */}
         <div className="flex-1 space-y-4">
           {weddingTimeline.map((step) => {
-            // 이 카테고리 내에 하나라도 포함(isExcluded가 false)된 항목이 있는지 확인
             const isCategoryIncluded = step.items.some(item => !selections[item.id].isExcluded);
 
             return (
@@ -129,7 +153,6 @@ function App() {
                 
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-gray-100 pb-2 mb-3 gap-2">
                   <div className="flex items-center">
-                    {/* ★ 카테고리 전체 제어 체크박스 */}
                     <input
                       type="checkbox"
                       checked={isCategoryIncluded}
@@ -162,7 +185,6 @@ function App() {
                   {step.items.map((item) => {
                     const sel = selections[item.id];
                     const isCustom = sel.tier === 'custom';
-                    // priceDB 연동 완료
                     const currentPrice = sel.isExcluded ? 0 : (isCustom ? (parseInt(sel.customPrice) || 0) : priceDB[item.id][sel.tier]);
 
                     return (
@@ -172,7 +194,7 @@ function App() {
                           sel.isExcluded ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-200 hover:border-indigo-200 shadow-sm'
                         }`}
                       >
-                        <div className="w-full xl:w-1/4 flex items-center">
+                        <div className="w-full xl:w-1/3 flex items-center">
                           <label className="flex items-center cursor-pointer group">
                             <input
                               type="checkbox"
@@ -180,33 +202,26 @@ function App() {
                               onChange={() => toggleExclude(item.id)}
                               className="w-4 h-4 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
                             />
-                            <span className={`ml-3 font-medium text-sm transition-colors ${sel.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700 group-hover:text-indigo-600'}`}>
+                            <span className={`ml-3 font-medium text-[14px] sm:text-[15px] transition-colors ${sel.isExcluded ? 'text-gray-400 line-through' : 'text-gray-700 group-hover:text-indigo-600'}`}>
                               {item.name}
+                              {item.isEssential && <span className="ml-1.5 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full align-middle">필수</span>}
                             </span>
                           </label>
                         </div>
 
-                        <div className={`w-full xl:w-[45%] flex flex-wrap sm:flex-nowrap gap-1 ${sel.isExcluded ? 'pointer-events-none' : ''}`}>
+                        <div className={`w-full xl:w-[40%] flex flex-wrap sm:flex-nowrap gap-1 ${sel.isExcluded ? 'pointer-events-none' : ''}`}>
                           {budgetTiers.map(tier => (
-                            <div key={tier.id} className="relative flex-1 group">
-                              <button
-                                onClick={() => handleTierChange(item.id, tier.id)}
-                                className={`w-full whitespace-nowrap py-1.5 px-1 text-[13px] rounded transition-colors border ${
-                                  (!sel.isExcluded && sel.tier === tier.id)
-                                    ? 'bg-indigo-600 text-white border-indigo-600 font-medium'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                                }`}
-                              >
-                                {tier.label}
-                              </button>
-                              
-                              {tier.id !== 'custom' && item.tooltips && (
-                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block w-max max-w-[200px] bg-gray-800 text-white text-xs px-2.5 py-1.5 rounded shadow-lg z-10 break-words text-center pointer-events-none">
-                                  {item.tooltips[tier.id]}
-                                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
-                                </div>
-                              )}
-                            </div>
+                            <button
+                              key={tier.id}
+                              onClick={() => handleTierChange(item.id, tier.id)}
+                              className={`flex-1 min-w-[50px] whitespace-nowrap py-1.5 px-1 text-[13px] rounded transition-colors border ${
+                                (!sel.isExcluded && sel.tier === tier.id)
+                                  ? 'bg-indigo-600 text-white border-indigo-600 font-medium'
+                                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              {tier.label}
+                            </button>
                           ))}
                         </div>
 
@@ -218,12 +233,12 @@ function App() {
                                 placeholder="금액 입력"
                                 value={sel.customPrice ? Number(sel.customPrice).toLocaleString() : ''}
                                 onChange={(e) => handleCustomPriceChange(item.id, e.target.value)}
-                                className="w-[120px] text-right p-1.5 border border-indigo-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm font-medium"
+                                className="w-[110px] text-right p-1.5 border border-indigo-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 text-sm font-medium"
                               />
-                              <span className="ml-1.5 text-gray-600 text-sm">원</span>
+                              <span className="ml-1 text-gray-600 text-sm">원</span>
                             </div>
                           ) : (
-                            <div className={`text-base font-bold ${sel.isExcluded ? 'text-gray-400' : 'text-gray-800'}`}>
+                            <div className={`text-[15px] sm:text-base font-bold ${sel.isExcluded ? 'text-gray-400' : 'text-gray-800'}`}>
                               {sel.isExcluded ? '제외됨' : `${currentPrice.toLocaleString()}원`}
                             </div>
                           )}
@@ -238,6 +253,7 @@ function App() {
           })}
         </div>
 
+        {/* 오른쪽 고정형 요약 대시보드 */}
         <div className="w-full lg:w-72 relative">
           <div className="sticky top-4 bg-white rounded-lg shadow-sm border border-indigo-100 overflow-hidden">
             <div className="bg-indigo-50 p-4 border-b border-indigo-100">
@@ -248,11 +264,11 @@ function App() {
             </div>
             
             <div className="p-4 bg-white">
-              <ul className="space-y-2">
+              <ul className="space-y-3">
                 {categoryTotals.map(cat => (
-                  <li key={cat.id} className="flex justify-between items-center text-[13px]">
-                    <span className="text-gray-600 truncate mr-2">{cat.title}</span>
-                    <span className="font-semibold text-gray-800">{cat.total.toLocaleString()}원</span>
+                  <li key={cat.id} className="flex justify-between items-center text-[13.5px]">
+                    <span className="text-gray-600 truncate mr-2 font-medium">{cat.title}</span>
+                    <span className="font-bold text-gray-800">{cat.total.toLocaleString()}원</span>
                   </li>
                 ))}
               </ul>
