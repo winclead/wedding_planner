@@ -216,8 +216,17 @@ function App() {
             </div>
           </div>
         </div>
-
       </div>
+{/* 🌟 새로 추가하는 통계 출처 안내 문구 (푸터) 🌟 */}
+      <div className="max-w-6xl mx-auto mt-12 p-6 bg-white rounded-lg shadow-sm border border-gray-200 text-gray-500 text-sm leading-relaxed">
+        <h4 className="font-bold text-gray-700 mb-2">📊 예산 플래너 데이터 산출 기준 안내</h4>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>본 예산 플래너의 <strong className="text-indigo-600">스탠다드(평균)</strong> 예산액은 대형 결혼정보회사(듀오)의 <strong>'2026 결혼비용 실태 보고서'</strong> 평균 통계치를 바탕으로 산출되었습니다.</li>
+          <li>(통계 기준 주요 항목 평균: 예식홀 1,460만 원, 신혼여행 1,030만 원, 스드메 471만 원, 혼수 1,445만 원 등)</li>
+          <li><strong>가성비</strong> 금액은 평균 통계의 약 40~50% 수준, <strong>프리미엄</strong> 금액은 하이엔드/호텔 예식 기준(200~300% 이상)으로 임의 책정된 참고용 데이터입니다.</li>
+          <li>실제 지출은 계약 시기, 업체, 지역에 따라 크게 달라질 수 있으므로 '직접입력' 기능을 활용해 본인만의 정확한 예산을 설계해 보세요.</li>
+        </ul>
+      </div>   
     </div>
   );
 }
